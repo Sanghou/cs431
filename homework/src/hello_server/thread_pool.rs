@@ -1,12 +1,11 @@
 //! Thread pool that joins all thread when dropped.
 
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+
 // NOTE: Crossbeam channels are MPMC, which means that you don't need to wrap the receiver in
 // Arc<Mutex<..>>. Just clone the receiver and give it to each worker thread.
 use crossbeam_channel::{unbounded, Sender};
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
-use std::thread::{JoinHandle, sleep};
-use std::time::Duration;
 
 struct Job(Box<dyn FnOnce() + Send + 'static>);
 
@@ -56,7 +55,7 @@ impl ThreadPoolInner {
     /// NOTE: We can optimize this function by adding another field to `ThreadPoolInner`, but let's
     /// not care about that in this homework.
     fn wait_empty(&self) {
-        let mut count  = self.job_count.lock().unwrap();
+        let mut count = self.job_count.lock().unwrap();
         while *count != 0 {
             count = self.empty_condvar.wait(count).unwrap();
         }
@@ -85,7 +84,7 @@ impl ThreadPool {
         let arc_receiver = Arc::new(receiver);
         // let pair = Arc::new((Mutex::new(0usize), Condvar::new()));
         // let cloned: Arc<(Mutex<usize>, Condvar)> = pair.clone();
-        let pool_inner = Arc::new(ThreadPoolInner{
+        let pool_inner = Arc::new(ThreadPoolInner {
             job_count: Mutex::new(0usize),
             empty_condvar: Condvar::new(),
         });
@@ -98,28 +97,23 @@ impl ThreadPool {
 
                 match message {
                     Ok(job) => {
-                        println!("Worker {idx} got a job; executing.");
                         inner.start_job();
                         job.0();
                         inner.finish_job();
-                        println!("Worker {idx} finish a job; shutting down.");
                     }
                     Err(_) => {
-                        println!("Worker {idx} disconnected; shutting down.");
                         break;
                     }
                 }
             });
 
-            workers.push(
-                Worker {
-                    _id : idx,
-                    thread: Some(thread)
-                }
-            )
+            workers.push(Worker {
+                _id: idx,
+                thread: Some(thread),
+            })
         }
 
-        ThreadPool{
+        ThreadPool {
             _workers: workers,
             job_sender: Some(sender),
             pool_inner,
