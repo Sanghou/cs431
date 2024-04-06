@@ -518,7 +518,7 @@ impl<T> LinkedList<T> {
     /// ```
     #[inline]
     pub fn back(&self) -> Option<&T> {
-        todo!()
+        unsafe { self.tail.as_ref() }.map(|node| &node.element)
     }
 
     /// Provides a mutable reference to the back element, or `None` if the list
@@ -564,7 +564,8 @@ impl<T> LinkedList<T> {
     /// assert_eq!(dl.front().unwrap(), &1);
     /// ```
     pub fn push_front(&mut self, elt: T) {
-        todo!()
+        let mut node = Node::new(elt);
+        self.push_front_node(node);
     }
 
     /// Removes the first element and returns it, or `None` if the list is
