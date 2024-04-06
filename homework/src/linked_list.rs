@@ -146,13 +146,40 @@ impl<T> LinkedList<T> {
     /// Adds the given node to the back of the list.
     #[inline]
     fn push_back_node(&mut self, mut node: Node<T>) {
-        todo!()
+        node.prev = self.tail;
+        node.next = ptr::null_mut();
+
+        let node = Box::into_raw(Box::new(node));
+
+        if self.tail.is_null() {
+            self.head = node;
+        } else {
+            unsafe { (*self.tail).next = node };
+        }
+
+        self.len += 1;
+        self.tail = node;
     }
 
     /// Removes and returns the node at the back of the list.
     #[inline]
     fn pop_back_node(&mut self) -> Option<Node<T>> {
-        todo!()
+        if self.tail.is_null() {
+            return None;
+        }
+
+        let node = unsafe { Box::from_raw(self.tail) };
+        let new_tail = node.prev;
+        self.tail = new_tail;
+
+        if new_tail.is_null() {
+            self.head = ptr::null_mut();
+        } else {
+            unsafe { (*self.tail).next = ptr::null_mut(); }
+        }
+
+        self.len -= 1;
+        Some(*node)
     }
 }
 
@@ -259,7 +286,20 @@ impl<T> LinkedList<T> {
     /// assert!(list1.is_empty());
     /// ```
     pub fn prepend(&mut self, other: &mut Self) {
-        todo!()
+        if self.head.is_null() {
+            mem::swap(other, self);
+        } else {
+            let other_tail = mem::replace(&mut other.tail, ptr::null_mut());
+
+            if !other_tail.is_null() {
+                unsafe {
+                    (*other_tail).next = self.head;
+                    (*self.head).prev = other_tail;
+                }
+                self.head = mem::replace(&mut other.head, ptr::null_mut());
+                self.len += mem::replace(&mut other.len, 0);
+            }
+        }
     }
 
     /// Provides a forward iterator.
