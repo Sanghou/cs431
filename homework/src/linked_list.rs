@@ -725,7 +725,9 @@ impl<T> IterMut<'_, T> {
     /// ```
     #[inline]
     pub fn insert_next(&mut self, element: T) {
-        todo!()
+
+        // let node = Node::new(element);
+        // self.list.push_front(element);
     }
 
     /// Provides a reference to the next element, without changing the iterator.
@@ -745,7 +747,13 @@ impl<T> IterMut<'_, T> {
     /// ```
     #[inline]
     pub fn peek_next(&mut self) -> Option<&mut T> {
-        todo!()
+        if self.head.is_null() {
+            None
+        } else {
+            unsafe { self.head.as_mut() }.map(|node| {
+                &mut node.element
+            })
+        }
     }
 }
 
