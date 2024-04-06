@@ -673,14 +673,30 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 
     #[inline]
     fn next(&mut self) -> Option<&'a mut T> {
-        todo!()
+        if self.len == 0 {
+            None
+        } else {
+            unsafe { self.head.as_mut() }.map(|node| {
+                self.len -= 1;
+                self.head = node.next;
+                &mut node.element
+            })
+        }
     }
 }
 
 impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
     #[inline]
     fn next_back(&mut self) -> Option<&'a mut T> {
-        todo!()
+        if self.len == 0 {
+            None
+        } else {
+            unsafe { self.tail.as_mut()}.map(|node| {
+                self.len -= 1;
+                self.tail = node.prev;
+                &mut node.element
+            })
+        }
     }
 }
 
