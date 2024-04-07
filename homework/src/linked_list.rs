@@ -175,7 +175,9 @@ impl<T> LinkedList<T> {
         if new_tail.is_null() {
             self.head = ptr::null_mut();
         } else {
-            unsafe { (*self.tail).next = ptr::null_mut(); }
+            unsafe {
+                (*self.tail).next = ptr::null_mut();
+            }
         }
 
         self.len -= 1;
@@ -691,7 +693,7 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
         if self.len == 0 {
             None
         } else {
-            unsafe { self.tail.as_mut()}.map(|node| {
+            unsafe { self.tail.as_mut() }.map(|node| {
                 self.len -= 1;
                 self.tail = node.prev;
                 &mut node.element
@@ -728,9 +730,7 @@ impl<T> IterMut<'_, T> {
         let curr = &self.list;
         let mut front = LinkedList::new();
         while self.list.head != self.head {
-            front.push_back_node(
-                self.list.pop_front_node().unwrap()
-            );
+            front.push_back_node(self.list.pop_front_node().unwrap());
         }
         front.push_back(element);
         self.list.prepend(&mut front);
@@ -756,9 +756,7 @@ impl<T> IterMut<'_, T> {
         if self.head.is_null() {
             None
         } else {
-            unsafe { self.head.as_mut() }.map(|node| {
-                &mut node.element
-            })
+            unsafe { self.head.as_mut() }.map(|node| &mut node.element)
         }
     }
 }
