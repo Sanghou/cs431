@@ -725,9 +725,15 @@ impl<T> IterMut<'_, T> {
     /// ```
     #[inline]
     pub fn insert_next(&mut self, element: T) {
-
-        // let node = Node::new(element);
-        // self.list.push_front(element);
+        let curr = &self.list;
+        let mut front = LinkedList::new();
+        while self.list.head != self.head {
+            front.push_back_node(
+                self.list.pop_front_node().unwrap()
+            );
+        }
+        front.push_back(element);
+        self.list.prepend(&mut front);
     }
 
     /// Provides a reference to the next element, without changing the iterator.
