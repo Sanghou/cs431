@@ -6,7 +6,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
-use std::ptr::NonNull;
+use std::ptr::{NonNull, null};
 use std::sync::atomic;
 
 #[cfg(feature = "check-loom")]
@@ -211,7 +211,12 @@ impl<T> Arc<T> {
     /// ```
     #[inline]
     pub fn get_mut(this: &mut Self) -> Option<&mut T> {
-        todo!()
+        if this.is_unique() {
+            let mut ptr_ref: &mut ArcInner<T> = unsafe { this.ptr.as_mut() };
+            Some(&mut ptr_ref.data)
+        } else {
+            None
+        }
     }
 
     // Used in `get_mut` and `make_mut` to check if the given `Arc` is the unique reference to the
@@ -378,7 +383,7 @@ impl<T> Clone for Arc<T> {
     /// ```
     #[inline]
     fn clone(&self) -> Arc<T> {
-        let inner = unsafe{ self.ptr.as_ref() };
+        let inner = self.inner();
 
         let rc = inner.count.fetch_add(1, SeqCst);
 
@@ -427,7 +432,7 @@ impl<T> Drop for Arc<T> {
     /// drop(foo2);   // Prints "dropped!"
     /// ```
     fn drop(&mut self) {
-        let ptr = unsafe { self.ptr.as_ref() };
+        let ptr = self.inner();
         if ptr.count.fetch_sub(1, SeqCst) != 1 {
             return;
         }
