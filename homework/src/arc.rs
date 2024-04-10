@@ -6,7 +6,7 @@ use std::{fmt, ptr};
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
-use std::ptr::{NonNull, null};
+use std::ptr::{NonNull, null, null_mut};
 use std::sync::atomic;
 
 #[cfg(feature = "check-loom")]
@@ -368,7 +368,24 @@ impl<T: Clone> Arc<T> {
     /// ```
     #[inline]
     pub fn make_mut(this: &mut Self) -> &mut T {
-        todo!()
+        if this.is_unique() == true {
+            // will not clone anything
+            unsafe { Self::get_mut_unchecked(this) }
+        } else {
+            //     let mut ptr_ref= unsafe { this.ptr.as_mut() };
+            //     &mut ptr_ref.data
+            // value가 다른 주소를 가리키도록. invoke `clone` on the inner value to ensure unique ownership.
+            // unsafe {
+            //     let data = Self::get_mut_unchecked(this);
+            //     let res= null_mut();
+            //     ptr::write(res, data);
+            //     res
+            // }
+            let mut data = unsafe { Self::get_mut_unchecked(this) };
+            let mut cloned = Arc::new(data.clone());
+            unsafe { ptr::write(this, cloned); }
+            unsafe { Self::get_mut_unchecked(this) }
+        }
     }
 }
 
