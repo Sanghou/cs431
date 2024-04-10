@@ -7,11 +7,13 @@ use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
 use std::ptr::NonNull;
+use std::sync::atomic;
 
 #[cfg(feature = "check-loom")]
 use loom::sync::atomic::{fence, AtomicUsize, Ordering};
 #[cfg(not(feature = "check-loom"))]
 use std::sync::atomic::{fence, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 
 const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 
@@ -216,7 +218,7 @@ impl<T> Arc<T> {
     // underlying data.
     #[inline]
     fn is_unique(&mut self) -> bool {
-        todo!()
+        self.inner().count.load(SeqCst) == 1
     }
 
     /// Returns a mutable reference into the given `Arc` without any check.
@@ -376,7 +378,17 @@ impl<T> Clone for Arc<T> {
     /// ```
     #[inline]
     fn clone(&self) -> Arc<T> {
-        todo!()
+        let inner = unsafe{ self.ptr.as_ref() };
+
+        let rc = inner.count.fetch_add(1, SeqCst);
+
+        if rc >= isize::MAX as usize {
+            panic!("isize 초과 에러");
+        }
+        Self {
+            ptr: self.ptr,
+            phantom: self.phantom,
+        }
     }
 }
 
@@ -415,7 +427,12 @@ impl<T> Drop for Arc<T> {
     /// drop(foo2);   // Prints "dropped!"
     /// ```
     fn drop(&mut self) {
-        todo!()
+        let ptr = unsafe { self.ptr.as_ref() };
+        if ptr.count.fetch_sub(1, SeqCst) != 1 {
+            return;
+        }
+        atomic::fence(SeqCst);
+        unsafe { let _ = Box::from_raw(self.ptr.as_ptr()); }
     }
 }
 
