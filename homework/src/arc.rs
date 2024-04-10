@@ -2,7 +2,7 @@
 //!
 //! See the [`Arc<T>`][Arc] documentation for more details.
 
-use std::fmt;
+use std::{fmt, ptr};
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
@@ -326,7 +326,17 @@ impl<T> Arc<T> {
     /// ```
     #[inline]
     pub fn try_unwrap(this: Self) -> Result<T, Self> {
-        todo!()
+        let inner = this.inner();
+
+        if inner.count.load(SeqCst) == 1 {
+            unsafe {
+                let data = ptr::read(&this.ptr.as_ref().data);
+                mem::forget(this);
+                Ok(data)
+            }
+        } else {
+            Err(this)
+        }
     }
 }
 
