@@ -275,7 +275,7 @@ impl<T> Arc<T> {
     /// ```
     #[inline]
     pub fn count(this: &Self) -> usize {
-        todo!()
+        this.inner().count.load(SeqCst)
     }
 
     #[inline]
