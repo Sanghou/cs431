@@ -2,18 +2,18 @@
 //!
 //! See the [`Arc<T>`][Arc] documentation for more details.
 
-use std::{fmt, ptr};
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
-use std::ptr::{NonNull, null, null_mut};
+use std::ptr::NonNull;
 use std::sync::atomic;
-
-#[cfg(feature = "check-loom")]
-use loom::sync::atomic::{fence, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering::SeqCst;
 #[cfg(not(feature = "check-loom"))]
 use std::sync::atomic::{fence, AtomicUsize, Ordering};
-use std::sync::atomic::Ordering::{Relaxed, SeqCst};
+use std::{fmt, ptr};
+
+#[cfg(feature = "check-loom")]
+use loom::sync::atomic::AtomicUsize;
 
 const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 
@@ -161,6 +161,7 @@ pub struct Arc<T> {
 }
 
 unsafe impl<T: Sync + Send> Send for Arc<T> {}
+
 unsafe impl<T: Sync + Send> Sync for Arc<T> {}
 
 impl<T> Arc<T> {
@@ -178,6 +179,7 @@ struct ArcInner<T> {
 }
 
 unsafe impl<T: Sync + Send> Send for ArcInner<T> {}
+
 unsafe impl<T: Sync + Send> Sync for ArcInner<T> {}
 
 impl<T> Arc<T> {
@@ -330,6 +332,7 @@ impl<T> Arc<T> {
 
         if inner.count.load(SeqCst) == 1 {
             unsafe {
+                inner.count.fetch_sub(1, SeqCst);
                 let data = ptr::read(&this.ptr.as_ref().data);
                 mem::forget(this);
                 Ok(data)
@@ -368,7 +371,7 @@ impl<T: Clone> Arc<T> {
     /// ```
     #[inline]
     pub fn make_mut(this: &mut Self) -> &mut T {
-        if this.is_unique() == true {
+        if this.is_unique() {
             // will not clone anything
             unsafe { Self::get_mut_unchecked(this) }
         } else {
@@ -383,7 +386,9 @@ impl<T: Clone> Arc<T> {
             // }
             let mut data = unsafe { Self::get_mut_unchecked(this) };
             let mut cloned = Arc::new(data.clone());
-            unsafe { ptr::write(this, cloned); }
+            unsafe {
+                ptr::write(this, cloned);
+            }
             unsafe { Self::get_mut_unchecked(this) }
         }
     }
@@ -464,7 +469,9 @@ impl<T> Drop for Arc<T> {
             return;
         }
         atomic::fence(SeqCst);
-        unsafe { let _ = Box::from_raw(self.ptr.as_ptr()); }
+        unsafe {
+            let _ = Box::from_raw(self.ptr.as_ptr());
+        }
     }
 }
 
