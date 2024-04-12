@@ -333,7 +333,7 @@ impl<T> Arc<T> {
         if inner.count.load(SeqCst) == 1 {
             unsafe {
                 inner.count.fetch_sub(1, SeqCst);
-                let data = ptr::read(&this.ptr.as_ref().data);
+                let data = Box::from_raw(this.ptr.as_ptr()).data;
                 mem::forget(this);
                 Ok(data)
             }
@@ -377,18 +377,10 @@ impl<T: Clone> Arc<T> {
         } else {
             //     let mut ptr_ref= unsafe { this.ptr.as_mut() };
             //     &mut ptr_ref.data
-            // value가 다른 주소를 가리키도록. invoke `clone` on the inner value to ensure unique ownership.
-            // unsafe {
-            //     let data = Self::get_mut_unchecked(this);
-            //     let res= null_mut();
-            //     ptr::write(res, data);
-            //     res
-            // }
+            // this가 다른 주소를 가리키도록. invoke `clone` on the inner value to ensure unique ownership.
             let mut data = unsafe { Self::get_mut_unchecked(this) };
             let mut cloned = Arc::new(data.clone());
-            unsafe {
-                ptr::write(this, cloned);
-            }
+            let _ = mem::replace(this, cloned);
             unsafe { Self::get_mut_unchecked(this) }
         }
     }
@@ -470,7 +462,7 @@ impl<T> Drop for Arc<T> {
         }
         atomic::fence(SeqCst);
         unsafe {
-            let _ = Box::from_raw(self.ptr.as_ptr());
+            drop(Box::from_raw(self.ptr.as_ptr()));
         }
     }
 }

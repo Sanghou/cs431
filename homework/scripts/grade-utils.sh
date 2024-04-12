@@ -10,7 +10,7 @@
 export RUST_NIGHTLY=nightly-2024-03-13
 # rustup toolchain update stable # nightly
 rustup install $RUST_NIGHTLY
-rustup component add rust-src --toolchain $RUST_NIGHTLY-aarch64-apple-darwin
+rustup component add rust-src --toolchain $RUST_NIGHTLY-x86_64-unknown-linux-gnu
 
 
 echo_err() {
@@ -100,7 +100,7 @@ _run_tests_with() {
     local FAILED=0
     for TEST in "${TESTS[@]}"; do
         local TEST_CMD="$CARGO test $* $TEST"
-        gtimeout ${TIMEOUT:-20s} bash -c "$TEST_CMD" 1>&2
+        timeout ${TIMEOUT:-20s} bash -c "$TEST_CMD" 1>&2
         case $? in
             0) ;;
             124) echo_err "Test timed out: $TEST_CMD"; FAILED=$((FAILED + 1));;
