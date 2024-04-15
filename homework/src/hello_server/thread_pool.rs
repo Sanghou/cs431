@@ -1,10 +1,11 @@
 //! Thread pool that joins all thread when dropped.
 
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+
 // NOTE: Crossbeam channels are MPMC, which means that you don't need to wrap the receiver in
 // Arc<Mutex<..>>. Just clone the receiver and give it to each worker thread.
 use crossbeam_channel::{unbounded, Sender};
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
 
 struct Job(Box<dyn FnOnce() + Send + 'static>);
 
@@ -20,7 +21,9 @@ impl Drop for Worker {
     ///
     /// NOTE: The thread is detached if not `join`ed explicitly.
     fn drop(&mut self) {
-        todo!()
+        if let Some(thread) = self.thread.take() {
+            thread.join().unwrap();
+        }
     }
 }
 
@@ -35,12 +38,16 @@ struct ThreadPoolInner {
 impl ThreadPoolInner {
     /// Increment the job count.
     fn start_job(&self) {
-        todo!()
+        let mut res = self.job_count.lock().unwrap();
+        *res += 1;
+        self.empty_condvar.notify_one();
     }
 
     /// Decrement the job count.
     fn finish_job(&self) {
-        todo!()
+        let mut res = self.job_count.lock().unwrap();
+        *res -= 1;
+        self.empty_condvar.notify_one();
     }
 
     /// Wait until the job count becomes 0.
@@ -48,7 +55,10 @@ impl ThreadPoolInner {
     /// NOTE: We can optimize this function by adding another field to `ThreadPoolInner`, but let's
     /// not care about that in this homework.
     fn wait_empty(&self) {
-        todo!()
+        let mut count = self.job_count.lock().unwrap();
+        while *count != 0 {
+            count = self.empty_condvar.wait(count).unwrap();
+        }
     }
 }
 
@@ -68,8 +78,46 @@ impl ThreadPool {
     /// Panics if `size` is 0.
     pub fn new(size: usize) -> Self {
         assert!(size > 0);
+        let mut workers = Vec::with_capacity(size);
 
-        todo!()
+        let (sender, receiver) = unbounded::<Job>();
+        let arc_receiver = Arc::new(receiver);
+        // let pair = Arc::new((Mutex::new(0usize), Condvar::new()));
+        // let cloned: Arc<(Mutex<usize>, Condvar)> = pair.clone();
+        let pool_inner = Arc::new(ThreadPoolInner {
+            job_count: Mutex::new(0usize),
+            empty_condvar: Condvar::new(),
+        });
+
+        for idx in 0..size {
+            let receiver = arc_receiver.clone();
+            let inner = pool_inner.clone();
+            let thread = thread::spawn(move || loop {
+                let message = receiver.recv();
+
+                match message {
+                    Ok(job) => {
+                        inner.start_job();
+                        job.0();
+                        inner.finish_job();
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                }
+            });
+
+            workers.push(Worker {
+                _id: idx,
+                thread: Some(thread),
+            })
+        }
+
+        ThreadPool {
+            _workers: workers,
+            job_sender: Some(sender),
+            pool_inner,
+        }
     }
 
     /// Execute a new job in the thread pool.
@@ -77,14 +125,17 @@ impl ThreadPool {
     where
         F: FnOnce() + Send + 'static,
     {
-        todo!()
+        let sender = self.job_sender.as_ref().unwrap();
+        let job = Job(Box::new(f));
+
+        sender.send(job).unwrap()
     }
 
     /// Block the current thread until all jobs in the pool have been executed.
     ///
     /// NOTE: This method has nothing to do with `JoinHandle::join`.
     pub fn join(&self) {
-        todo!()
+        self.pool_inner.wait_empty();
     }
 }
 
@@ -92,6 +143,13 @@ impl Drop for ThreadPool {
     /// When dropped, all worker threads' `JoinHandle` must be `join`ed. If the thread panicked,
     /// then this function should panic too.
     fn drop(&mut self) {
-        todo!()
+        drop(self.job_sender.take());
+
+        for worker in &mut self._workers {
+            if let Some(thread) = worker.thread.take() {
+                thread.join().unwrap();
+            }
+            println!("Shutting down worker {}", worker._id);
+        }
     }
 }
