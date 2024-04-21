@@ -63,7 +63,8 @@ impl Request {
     /// `behavior` must be a valid raw pointer to the behavior for `self`, and this should be the
     /// only enqueueing of this request and behavior.
     unsafe fn start_enqueue(&self, behavior: *const Behavior) {
-        let mut prev_request = self.target.last().swap(self as *const _ as *mut _, SeqCst);
+        let t = self as *const Request as *mut Request;
+        let mut prev_request = self.target.last().swap(t, SeqCst);
 
         if prev_request.is_null() {
             unsafe { Behavior::resolve_one(behavior) };
@@ -227,12 +228,13 @@ impl Behavior {
             return;
         }
 
-        let cased = unsafe { Box::from_raw(this.cast_mut()) };
-
+        let casted = unsafe { Box::from_raw(this.cast_mut()) };
+        let thunk = casted.thunk;
+        let request = casted.requests;
         rayon::spawn(|| {
+            thunk(); // die here..
             unsafe {
-                (cased.thunk)(); // die here..
-                for request in cased.requests {
+                for request in request {
                     request.release();
                 }
             }
@@ -256,6 +258,7 @@ impl Behavior {
         C: CownPtrs + Send + 'static,
         F: for<'l> Fn(C::CownRefs<'l>) + Send + 'static,
     {
+        cowns.requests().sort();
         let mut requests = Vec::new();
 
         for request in cowns.requests() {
@@ -264,7 +267,7 @@ impl Behavior {
 
         Behavior {
             thunk: Box::new(move || f(unsafe { cowns.get_mut() })),
-            count: AtomicUsize::new(requests.len()),
+            count: AtomicUsize::new(requests.len() + 1),
             requests,
         }
     }
