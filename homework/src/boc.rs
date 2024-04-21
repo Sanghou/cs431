@@ -63,18 +63,16 @@ impl Request {
     /// `behavior` must be a valid raw pointer to the behavior for `self`, and this should be the
     /// only enqueueing of this request and behavior.
     unsafe fn start_enqueue(&self, behavior: *const Behavior) {
+        let mut prev_request = self.target.last().swap(self as *const _ as *mut _, SeqCst);
 
-        let mut prev_last = self.target.last().swap(self as *const _ as *mut _, SeqCst);
-
-        if prev_last.is_null() {
-            unsafe { Behavior::resolve_one(behavior) }
+        if prev_request.is_null() {
+            unsafe { Behavior::resolve_one(behavior) };
+            return;
         }
 
-        while unsafe { !(*prev_last).scheduled.load(SeqCst) } {
-            sleep(Duration::new(1, 0));
-        }
+        while unsafe { !(*prev_request).scheduled.load(SeqCst) } {}
 
-        unsafe { (*prev_last).next.store(behavior.cast_mut(), SeqCst) };
+        unsafe { (*prev_request).next.store(behavior.cast_mut(), SeqCst) };
     }
 
     /// Finish the second phase of the 2PL enqueue operation.
@@ -85,7 +83,7 @@ impl Request {
     ///
     /// All enqueues for smaller requests on this cown must have been completed.
     unsafe fn finish_enqueue(&self) {
-        self.scheduled.swap(true, SeqCst);
+        self.scheduled.store(true, SeqCst);
     }
 
     /// Release the cown to the next behavior.
@@ -107,10 +105,7 @@ impl Request {
                 return;
             }
 
-            while next.is_null() {
-                sleep(Duration::new(1, 0));
-            }
-
+            while next.is_null() {}
         }
         unsafe { Behavior::resolve_one(next) };
     }
@@ -228,18 +223,15 @@ impl Behavior {
     ///
     /// `this` must be a valid behavior.
     unsafe fn resolve_one(this: *const Self) {
-        if unsafe { (*this).count.fetch_sub(1, SeqCst) } != 0 {
+        if unsafe { (*this).count.fetch_sub(1, SeqCst) } != 1 {
             return;
         }
 
         let cased = unsafe { Box::from_raw(this.cast_mut()) };
 
-        // let thunk = (*this.cast_mut()).thunk.deref();
-        // let requests = &(*this.cast_mut()).requests;
-
         rayon::spawn(|| {
             unsafe {
-                (cased.thunk)();
+                (cased.thunk)(); // die here..
                 for request in cased.requests {
                     request.release();
                 }
