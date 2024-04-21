@@ -5,8 +5,13 @@ use core::fmt;
 use core::hint::spin_loop;
 use core::ptr::null_mut;
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering::SeqCst};
+use std::{mem, ptr};
+use std::ops::Deref;
+use std::ptr::null;
 
 use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
 
 /// A trait representing a `Cown`.
 ///
@@ -58,7 +63,18 @@ impl Request {
     /// `behavior` must be a valid raw pointer to the behavior for `self`, and this should be the
     /// only enqueueing of this request and behavior.
     unsafe fn start_enqueue(&self, behavior: *const Behavior) {
-        todo!()
+
+        let mut prev_last = self.target.last().swap(self as *const _ as *mut _, SeqCst);
+
+        if prev_last.is_null() {
+            unsafe { Behavior::resolve_one(behavior) }
+        }
+
+        while unsafe { !(*prev_last).scheduled.load(SeqCst) } {
+            sleep(Duration::new(1, 0));
+        }
+
+        unsafe { (*prev_last).next.store(behavior.cast_mut(), SeqCst) };
     }
 
     /// Finish the second phase of the 2PL enqueue operation.
@@ -69,7 +85,7 @@ impl Request {
     ///
     /// All enqueues for smaller requests on this cown must have been completed.
     unsafe fn finish_enqueue(&self) {
-        todo!()
+        self.scheduled.swap(true, SeqCst);
     }
 
     /// Release the cown to the next behavior.
@@ -81,7 +97,22 @@ impl Request {
     ///
     /// `self` must have been actually completed.
     unsafe fn release(&self) {
-        todo!()
+        let next = self.next.load(SeqCst);
+
+        if next.is_null() {
+            let last_ref = self.target.last();
+            if self.target.last()
+                .compare_exchange(null_mut(), self as *const _ as *mut _, SeqCst, SeqCst)
+                .is_ok() {
+                return;
+            }
+
+            while next.is_null() {
+                sleep(Duration::new(1, 0));
+            }
+
+        }
+        unsafe { Behavior::resolve_one(next) };
     }
 }
 
@@ -177,7 +208,15 @@ impl Behavior {
     /// Performs two phase locking (2PL) over the enqueuing of the requests.
     /// This ensures that the overall effect of the enqueue is atomic.
     fn schedule(self) {
-        todo!()
+        for request in &self.requests {
+            unsafe { request.start_enqueue(&self); }
+        }
+
+        for request in &self.requests {
+            unsafe { request.finish_enqueue(); }
+        }
+
+        unsafe { Self::resolve_one(&self) }
     }
 
     /// Resolves a single outstanding request for `this`.
@@ -189,7 +228,23 @@ impl Behavior {
     ///
     /// `this` must be a valid behavior.
     unsafe fn resolve_one(this: *const Self) {
-        todo!()
+        if unsafe { (*this).count.fetch_sub(1, SeqCst) } != 0 {
+            return;
+        }
+
+        let cased = unsafe { Box::from_raw(this.cast_mut()) };
+
+        // let thunk = (*this.cast_mut()).thunk.deref();
+        // let requests = &(*this.cast_mut()).requests;
+
+        rayon::spawn(|| {
+            unsafe {
+                (cased.thunk)();
+                for request in cased.requests {
+                    request.release();
+                }
+            }
+        })
     }
 }
 
@@ -203,14 +258,23 @@ impl fmt::Debug for Behavior {
     }
 }
 
-// TODO: terminator?
 impl Behavior {
     fn new<C, F>(cowns: C, f: F) -> Behavior
     where
         C: CownPtrs + Send + 'static,
         F: for<'l> Fn(C::CownRefs<'l>) + Send + 'static,
     {
-        todo!()
+        let mut requests = Vec::new();
+
+        for request in cowns.requests() {
+            requests.push(request);
+        }
+
+        Behavior {
+            thunk: Box::new(move || f(unsafe { cowns.get_mut() })),
+            count: AtomicUsize::new(requests.len()),
+            requests,
+        }
     }
 }
 
