@@ -64,14 +64,16 @@ impl Request {
     /// only enqueueing of this request and behavior.
     unsafe fn start_enqueue(&self, behavior: *const Behavior) {
         let t = self as *const Request as *mut Request;
-        let mut prev_request = self.target.last().swap(t, SeqCst);
+        let mut prev_request = self.target.clone().last().swap(t, SeqCst);
 
         if prev_request.is_null() {
             unsafe { Behavior::resolve_one(behavior) };
             return;
         }
 
-        while unsafe { !(*prev_request).scheduled.load(SeqCst) } {}
+        while unsafe { !(*prev_request).scheduled.load(SeqCst) } {
+            sleep(Duration::from_micros(1));
+        }
 
         unsafe { (*prev_request).next.store(behavior.cast_mut(), SeqCst) };
     }
@@ -99,14 +101,15 @@ impl Request {
         let next = self.next.load(SeqCst);
 
         if next.is_null() {
-            let last_ref = self.target.last();
-            if self.target.last()
+            if self.target.clone().last()
                 .compare_exchange(null_mut(), self as *const _ as *mut _, SeqCst, SeqCst)
                 .is_ok() {
                 return;
             }
 
-            while next.is_null() {}
+            while next.is_null() {
+                sleep(Duration::from_micros(1));
+            }
         }
         unsafe { Behavior::resolve_one(next) };
     }
@@ -204,15 +207,17 @@ impl Behavior {
     /// Performs two phase locking (2PL) over the enqueuing of the requests.
     /// This ensures that the overall effect of the enqueue is atomic.
     fn schedule(self) {
-        for request in &self.requests {
-            unsafe { request.start_enqueue(&self); }
+        let phantom = Box::leak(Box::new(self));
+
+        for request in &phantom.requests {
+            unsafe { request.start_enqueue(phantom); }
         }
 
-        for request in &self.requests {
+        for request in &phantom.requests {
             unsafe { request.finish_enqueue(); }
         }
 
-        unsafe { Self::resolve_one(&self) }
+        unsafe { Self::resolve_one(phantom) }
     }
 
     /// Resolves a single outstanding request for `this`.
@@ -230,15 +235,15 @@ impl Behavior {
 
         let casted = unsafe { Box::from_raw(this.cast_mut()) };
         let thunk = casted.thunk;
-        let request = casted.requests;
+        let requests = casted.requests;
         rayon::spawn(|| {
             thunk(); // die here..
             unsafe {
-                for request in request {
+                for request in requests {
                     request.release();
                 }
             }
-        })
+        });
     }
 }
 
