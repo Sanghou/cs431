@@ -236,7 +236,6 @@ impl Behavior {
     /// `this` must be a valid behavior.
     unsafe fn resolve_one(this: *const Self) {
         if unsafe { (*this).count.fetch_sub(1, SeqCst) } == 1 {
-
             let casted = unsafe { Box::from_raw(this.cast_mut()) };
 
             rayon::spawn(|| {
