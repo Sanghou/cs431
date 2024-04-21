@@ -2,16 +2,18 @@
 //!
 //! See the [`Arc<T>`][Arc] documentation for more details.
 
-use std::fmt;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
 use std::ptr::NonNull;
-
-#[cfg(feature = "check-loom")]
-use loom::sync::atomic::{fence, AtomicUsize, Ordering};
+use std::sync::atomic;
+use std::sync::atomic::Ordering::SeqCst;
 #[cfg(not(feature = "check-loom"))]
 use std::sync::atomic::{fence, AtomicUsize, Ordering};
+use std::{fmt, ptr};
+
+#[cfg(feature = "check-loom")]
+use loom::sync::atomic::AtomicUsize;
 
 const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 
@@ -159,6 +161,7 @@ pub struct Arc<T> {
 }
 
 unsafe impl<T: Sync + Send> Send for Arc<T> {}
+
 unsafe impl<T: Sync + Send> Sync for Arc<T> {}
 
 impl<T> Arc<T> {
@@ -176,6 +179,7 @@ struct ArcInner<T> {
 }
 
 unsafe impl<T: Sync + Send> Send for ArcInner<T> {}
+
 unsafe impl<T: Sync + Send> Sync for ArcInner<T> {}
 
 impl<T> Arc<T> {
@@ -209,14 +213,19 @@ impl<T> Arc<T> {
     /// ```
     #[inline]
     pub fn get_mut(this: &mut Self) -> Option<&mut T> {
-        todo!()
+        if this.is_unique() {
+            let mut ptr_ref: &mut ArcInner<T> = unsafe { this.ptr.as_mut() };
+            Some(&mut ptr_ref.data)
+        } else {
+            None
+        }
     }
 
     // Used in `get_mut` and `make_mut` to check if the given `Arc` is the unique reference to the
     // underlying data.
     #[inline]
     fn is_unique(&mut self) -> bool {
-        todo!()
+        self.inner().count.load(SeqCst) == 1
     }
 
     /// Returns a mutable reference into the given `Arc` without any check.
@@ -268,7 +277,7 @@ impl<T> Arc<T> {
     /// ```
     #[inline]
     pub fn count(this: &Self) -> usize {
-        todo!()
+        this.inner().count.load(SeqCst)
     }
 
     #[inline]
@@ -319,7 +328,18 @@ impl<T> Arc<T> {
     /// ```
     #[inline]
     pub fn try_unwrap(this: Self) -> Result<T, Self> {
-        todo!()
+        let inner = this.inner();
+
+        if inner.count.load(SeqCst) == 1 {
+            unsafe {
+                inner.count.fetch_sub(1, SeqCst);
+                let data = Box::from_raw(this.ptr.as_ptr()).data;
+                mem::forget(this);
+                Ok(data)
+            }
+        } else {
+            Err(this)
+        }
     }
 }
 
@@ -351,7 +371,18 @@ impl<T: Clone> Arc<T> {
     /// ```
     #[inline]
     pub fn make_mut(this: &mut Self) -> &mut T {
-        todo!()
+        if this.is_unique() {
+            // will not clone anything
+            unsafe { Self::get_mut_unchecked(this) }
+        } else {
+            //     let mut ptr_ref= unsafe { this.ptr.as_mut() };
+            //     &mut ptr_ref.data
+            // this가 다른 주소를 가리키도록. invoke `clone` on the inner value to ensure unique ownership.
+            let mut data = unsafe { Self::get_mut_unchecked(this) };
+            let mut cloned = Arc::new(data.clone());
+            let _ = mem::replace(this, cloned);
+            unsafe { Self::get_mut_unchecked(this) }
+        }
     }
 }
 
@@ -376,7 +407,17 @@ impl<T> Clone for Arc<T> {
     /// ```
     #[inline]
     fn clone(&self) -> Arc<T> {
-        todo!()
+        let inner = self.inner();
+
+        let rc = inner.count.fetch_add(1, SeqCst);
+
+        if rc >= isize::MAX as usize {
+            panic!("isize 초과 에러");
+        }
+        Self {
+            ptr: self.ptr,
+            phantom: self.phantom,
+        }
     }
 }
 
@@ -415,7 +456,14 @@ impl<T> Drop for Arc<T> {
     /// drop(foo2);   // Prints "dropped!"
     /// ```
     fn drop(&mut self) {
-        todo!()
+        let ptr = self.inner();
+        if ptr.count.fetch_sub(1, SeqCst) != 1 {
+            return;
+        }
+        atomic::fence(SeqCst);
+        unsafe {
+            drop(Box::from_raw(self.ptr.as_ptr()));
+        }
     }
 }
 
