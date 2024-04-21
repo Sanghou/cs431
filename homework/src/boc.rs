@@ -5,9 +5,9 @@ use core::fmt;
 use core::hint::spin_loop;
 use core::ptr::null_mut;
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering::SeqCst};
-use std::{mem, ptr};
 use std::ops::Deref;
 use std::ptr::null;
+use std::{mem, ptr};
 
 use std::sync::Arc;
 use std::thread::sleep;
@@ -101,9 +101,13 @@ impl Request {
         let next = self.next.load(SeqCst);
 
         if next.is_null() {
-            if self.target.clone().last()
+            if self
+                .target
+                .clone()
+                .last()
                 .compare_exchange(null_mut(), self as *const _ as *mut _, SeqCst, SeqCst)
-                .is_ok() {
+                .is_ok()
+            {
                 return;
             }
 
@@ -210,11 +214,15 @@ impl Behavior {
         let phantom = Box::leak(Box::new(self));
 
         for request in &phantom.requests {
-            unsafe { request.start_enqueue(phantom); }
+            unsafe {
+                request.start_enqueue(phantom);
+            }
         }
 
         for request in &phantom.requests {
-            unsafe { request.finish_enqueue(); }
+            unsafe {
+                request.finish_enqueue();
+            }
         }
 
         unsafe { Self::resolve_one(phantom) }
