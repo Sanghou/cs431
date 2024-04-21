@@ -103,19 +103,17 @@ impl Request {
         if next.is_null() {
             if self
                 .target
-                .clone()
                 .last()
-                .compare_exchange(null_mut(), self as *const _ as *mut _, SeqCst, SeqCst)
+                .compare_exchange(self as *const _ as *mut _, null_mut(), SeqCst, SeqCst)
                 .is_ok()
             {
                 return;
             }
-
-            while next.is_null() {
+            while self.next.load(SeqCst).is_null() {
                 sleep(Duration::from_micros(1));
             }
         }
-        unsafe { Behavior::resolve_one(next) };
+        unsafe { Behavior::resolve_one(self.next.load(SeqCst)) };
     }
 }
 
@@ -237,21 +235,23 @@ impl Behavior {
     ///
     /// `this` must be a valid behavior.
     unsafe fn resolve_one(this: *const Self) {
-        if unsafe { (*this).count.fetch_sub(1, SeqCst) } != 1 {
-            return;
-        }
+        if unsafe { (*this).count.fetch_sub(1, SeqCst) } == 1 {
 
-        let casted = unsafe { Box::from_raw(this.cast_mut()) };
-        let thunk = casted.thunk;
-        let requests = casted.requests;
-        rayon::spawn(|| {
-            thunk(); // die here..
-            unsafe {
-                for request in requests {
-                    request.release();
+            let casted = unsafe { Box::from_raw(this.cast_mut()) };
+
+            rayon::spawn(|| {
+                let thunk = casted.thunk;
+                let requests = &casted.requests;
+
+                thunk(); // die here..
+
+                unsafe {
+                    for request in requests {
+                        request.release();
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 }
 
@@ -271,17 +271,13 @@ impl Behavior {
         C: CownPtrs + Send + 'static,
         F: for<'l> Fn(C::CownRefs<'l>) + Send + 'static,
     {
-        cowns.requests().sort();
-        let mut requests = Vec::new();
-
-        for request in cowns.requests() {
-            requests.push(request);
-        }
+        let mut sorted = cowns.requests();
+        sorted.sort();
 
         Behavior {
             thunk: Box::new(move || f(unsafe { cowns.get_mut() })),
-            count: AtomicUsize::new(requests.len() + 1),
-            requests,
+            count: AtomicUsize::new(sorted.len() + 1),
+            requests: sorted,
         }
     }
 }
